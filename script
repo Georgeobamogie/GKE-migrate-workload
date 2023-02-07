@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# Set the project ID and the old node pool name
+PROJECT_ID=<PROJECT_ID>
+OLD_NODEPOOL_NAME=<OLD_NODEPOOL_NAME>
+
+# Set the new node pool name and specify the machine type and number of nodes
+NEW_NODEPOOL_NAME=<NEW_NODEPOOL_NAME>
+MACHINE_TYPE=<MACHINE_TYPE>
+NUM_NODES=<NUM_NODES>
+
+# Create the new node pool
+gcloud beta container node-pools create $NEW_NODEPOOL_NAME \
+  --cluster=<CLUSTER_NAME> \
+  --project=$PROJECT_ID \
+  --num-nodes=$NUM_NODES \
+  --machine-type=$MACHINE_TYPE \
+  --image-type=UBUNTU
+
+# Label the old node pool
+kubectl label nodes $(kubectl get nodes -l cloud.google.com/gke-nodepool=$OLD_NODEPOOL_NAME -o jsonpath='{.items[*].metadata.name}') nodepool=$OLD_NODEPOOL_NAME
+
+# Label the new node pool
+kubectl label nodes $(kubectl get nodes -l cloud.google.com/gke-nodepool=$NEW_NODEPOOL_NAME -o jsonpath='{.items[*].metadata.name}') nodepool=$NEW_NODEPOOL_NAME
+
+# Apply the label to all existing workloads in the old node pool
+kubectl label pods --all nodepool=$OLD_NODEPOOL_NAME
+
+# Get the list of all pods in the old node pool
+OLD_PODS=$(kubectl get pods -l nodepool=$OLD_NODEPOOL_NAME -o jsonpath='{.items[*].metadata.name}')
+
+# Drain the old node pool to remove all pods from it
+for pod in $OLD_PODS; do
+  kubectl drain $pod --delete-local-data --force --ignore-daemonsets
+done
+
+# Delete the old node pool
+gcloud beta container node-pools delete $OLD_NODEPOOL_NAME \
+  --cluster=<CLUSTER_NAME> \
+  --project=$PROJECT_ID \
+  --quiet
